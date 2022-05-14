@@ -1,33 +1,27 @@
 ## Simple homeless system model
 ## Using stochastic differential equations
 
-## Model contains four compartments
-## U = unsheltered
-## S = temporary shelter (e.g., emergency shelter, transitional housing)
-## P = permanent housing (e.g., rapid rehousing, permanent supportive housing)
-## O = other housing in the community
+# Model contains four compartments
+# U = unsheltered
+# S = temporary shelter (e.g., emergency shelter, transitional housing)
+# P = permanent housing (e.g., rapid rehousing, permanent supportive housing)
+# O = other housing in the community
+# Because shelter and housing have fixed capacities, their inflows/outflows cancel out
+# As a result, only the system inflow and system outflow need to be modeled
+# Note that outflow is proportional to the conditions of U, S, and P
+
+# However, in the real world exit rates to permanent housing may be note, 
+# but not specifically to other housing in the community.
+# To address this, the inflows/outflow from S and P can be incorporated into estimates
 
 rm(list = ls(all = TRUE))  # resets R to fresh
 
 library(ggplot2)
 
-
-#### Deterministic model function ####
-model_func=function(t, x, vparameters){
-  U = x[1]  
-  S = x[2]  
-  P = x[3]  
-  O = x[4]  
-  
-  with(as.list(vparameters),{
-    dU = alpha - beta_u*U - beta_s*S - beta_p*P            
-    dS = 0 #fixed capacity
-    dP = 0 #fixed capacity
-    dO = beta_u*U + beta_s*S + beta_p*P
-    out = c(dU, dS, dP, dO)
-    list(out)
-  })
-}
+set.seed(78324)
+tend <- 10      # years to model
+delta_t <- 1/12 # time steps
+niter <- 100    # iterations of stochastic model
 
 
 #### Initial conditions ####
@@ -36,10 +30,7 @@ S_0 <- 150
 P_0 <- 350
 O_0 <- 0
 
-#### Parameters ####
-# Because shelter and housing have fixed capacities, their inflows/outflows cancel out
-# As a result, only the system inflow and system outflow need to be modeled
-# Note, however, that outflow is proportional to the conditions of U, S, and P
+#### Model parameters ####
 
 ## Inflow
 alpha <- 300 #fixed inflow rate per year
@@ -60,27 +51,38 @@ beta_u <- u_out * u_pct_o
 beta_s <- s_out * s_pct_o
 beta_p <- p_out * p_pct_o
 
-#### Run deterministic model ####
-tend <- 10
-vt <- seq(0,tend,1/12)
+
+#### Deterministic model ####
+
+## Function for deterministic model
+model_func=function(t, x, vparameters){
+  U = x[1]  
+  S = x[2]  
+  P = x[3]  
+  O = x[4]  
+  
+  with(as.list(vparameters),{
+    dU = alpha - beta_u*U - beta_s*S - beta_p*P            
+    dS = 0 #fixed capacity
+    dP = 0 #fixed capacity
+    dO = beta_u*U + beta_s*S + beta_p*P
+    out = c(dU, dS, dP, dO)
+    list(out)
+  })
+}
+
+## Run deterministic model
+vt <- seq(0, tend, delta_t)
 vparameters = c(alpha = alpha, beta_u = beta_u, beta_s = beta_s, beta_p = beta_p)
 inits <- c(U = U_0, S = S_0, P = P_0, O = O_0)
 dmodel <- as.data.frame(lsoda(inits, vt, model_func, vparameters))
 
-# ggplot(dmodel, aes(x = time, y = U)) + 
-#   geom_line() +
-#   scale_x_continuous(breaks = seq(0, 10, 1)) +
-#   expand_limits(y = 0)
+
 
 #### Stochastic Model ####
 # Credit for approach and significant chunks of code to: Sherry Towers
 # http://sherrytowers.com/2016/02/06/stochastic-compartmental-modelling-with-stochastic-differential-equations-2/
 
-
-set.seed(78324)
-niter <- 100
-
-delta_t <- 1/12
 zstate <- list()
 i <- 1L
 for (iter in 1:niter){
@@ -96,7 +98,7 @@ for (iter in 1:niter){
   lambda[3,] <- c(-1,0,0,1)
   lambda[4,] <- c(-1,0,0,1)
   
-  while(vstate[1] > 0 & time < tend) {
+  while(vstate[1] > 0 & time < (tend + delta_t)) {
     zstate[[i]] <- c(vstate, time, iter)
     U <- vstate[1]
     S <- vstate[2]
@@ -134,8 +136,15 @@ for (iter in 1:niter){
 smodel <- data.frame(matrix(unlist(zstate), ncol = 6, byrow = TRUE))
 colnames(smodel) <- c("U", "S", "P", "O", "time", "iter")
 
+#### Plot results ####
 ggplot() +
   geom_line(data = smodel, aes(x = time, y = U, group = iter), alpha = .1) +
   geom_line(data = dmodel, aes(x = time, y = U), color = "indianred") +
   scale_x_continuous(breaks = seq(0, 10, 1)) +
-  expand_limits(y = 0)
+  expand_limits(y = 0) +
+  labs(title = "Projection of Unsheltered Homelessness",
+       subtitle = "Results of deterministic and stochastic models",
+       x = "Years",
+       y = "Unsheltered Homelessness") +
+  theme_minimal() +
+  theme(panel.grid.minor.x = element_blank())
