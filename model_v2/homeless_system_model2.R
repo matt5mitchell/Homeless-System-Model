@@ -19,9 +19,10 @@ rm(list = ls(all = TRUE))  # resets R to fresh
 library(ggplot2)
 
 set.seed(78324)
-tend <- 10      # years to model
-delta_t <- 1/12 # time steps
-niter <- 100    # iterations of stochastic model
+tend <- 10         # years to model
+delta_t <- 1/12    # time steps
+niter <- 100       # iterations of stochastic model
+stochastic <- TRUE # TRUE for stochastic, FALSE for deterministic
 
 
 #### Initial conditions ####
@@ -54,28 +55,30 @@ beta_p <- p_out * p_pct_o
 
 #### Deterministic model ####
 
-## Function for deterministic model
-model_func=function(t, x, vparameters){
-  U = x[1]  
-  S = x[2]  
-  P = x[3]  
-  O = x[4]  
-  
-  with(as.list(vparameters),{
-    dU = alpha - beta_u*U - beta_s*S - beta_p*P            
-    dS = 0 #fixed capacity
-    dP = 0 #fixed capacity
-    dO = beta_u*U + beta_s*S + beta_p*P
-    out = c(dU, dS, dP, dO)
-    list(out)
-  })
-}
 
-## Run deterministic model
-vt <- seq(0, tend, delta_t)
-vparameters = c(alpha = alpha, beta_u = beta_u, beta_s = beta_s, beta_p = beta_p)
-inits <- c(U = U_0, S = S_0, P = P_0, O = O_0)
-dmodel <- as.data.frame(lsoda(inits, vt, model_func, vparameters))
+# library(deSolve)
+# ## Function for deterministic model
+# model_func=function(t, x, vparameters){
+#   U = x[1]  
+#   S = x[2]  
+#   P = x[3]  
+#   O = x[4]  
+#   
+#   with(as.list(vparameters),{
+#     dU = alpha - beta_u*U - beta_s*S - beta_p*P            
+#     dS = 0 #fixed capacity
+#     dP = 0 #fixed capacity
+#     dO = beta_u*U + beta_s*S + beta_p*P
+#     out = c(dU, dS, dP, dO)
+#     list(out)
+#   })
+# }
+# 
+# ## Run deterministic model
+# vt <- seq(0, tend, delta_t)
+# vparameters = c(alpha = alpha, beta_u = beta_u, beta_s = beta_s, beta_p = beta_p)
+# inits <- c(U = U_0, S = S_0, P = P_0, O = O_0)
+# dmodel <- as.data.frame(lsoda(inits, vt, model_func, vparameters))
 
 
 
@@ -83,9 +86,11 @@ dmodel <- as.data.frame(lsoda(inits, vt, model_func, vparameters))
 # Credit for approach and significant chunks of code to: Sherry Towers
 # http://sherrytowers.com/2016/02/06/stochastic-compartmental-modelling-with-stochastic-differential-equations-2/
 
+niter2 <- if(stochastic) niter else 1 # FALSE = only one iteration
+
 zstate <- list()
 i <- 1L
-for (iter in 1:niter){
+for (iter in 1:niter2){
   time <- 0
   vstate <- c(U_0, S_0, P_0, O_0)
   
@@ -115,7 +120,7 @@ for (iter in 1:niter){
     }
     G <- t(G_t)
     
-    W <- rnorm(ncol(G))
+    W <- rnorm(ncol(G)) * stochastic # TRUE coerced to 1, FALSE coerced to 0
     delta_U <- delta_t*(alpha - beta_u*U - beta_s*S - beta_p*P) + sqrt(delta_t)*sum(G[1,]*W)
     delta_S <- 0 #delta_t*0                                     + sqrt(delta_t)*sum(G[2,]*W)
     delta_P <- 0 #delta_t*0                                     + sqrt(delta_t)*sum(G[3,]*W)
@@ -137,13 +142,18 @@ smodel <- data.frame(matrix(unlist(zstate), ncol = 6, byrow = TRUE))
 colnames(smodel) <- c("U", "S", "P", "O", "time", "iter")
 
 #### Plot results ####
+subtitle <- if(stochastic) {
+  paste("Results of", niter, "runs of stochastic model with time steps of", round(delta_t,3), "year")
+} else { paste("Results of deterministic model with time steps of", round(delta_t,3), "year")}
+alpha <- if(stochastic) 0.1 else 1
+
 ggplot() +
-  geom_line(data = smodel, aes(x = time, y = U, group = iter), alpha = .1) +
-  geom_line(data = dmodel, aes(x = time, y = U), color = "indianred") +
+  geom_line(data = smodel, aes(x = time, y = U, group = iter), alpha = alpha) +
+  # geom_line(data = dmodel, aes(x = time, y = U), color = "indianred") +
   scale_x_continuous(breaks = seq(0, 10, 1)) +
   expand_limits(y = 0) +
   labs(title = "Projection of Unsheltered Homelessness",
-       subtitle = "Results of deterministic and stochastic models",
+       subtitle = subtitle,
        x = "Years",
        y = "Unsheltered Homelessness") +
   theme_minimal() +
