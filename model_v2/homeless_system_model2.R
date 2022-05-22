@@ -7,15 +7,18 @@
 # P = permanent housing (e.g., rapid rehousing, permanent supportive housing)
 # O = other housing in the community
 # Because shelter and housing have fixed capacities, their inflows/outflows cancel out
-# As a result, only the system inflow and system outflow need to be modeled
-# Note that outflow is proportional to the conditions of U, S, and P
+# As a result, only the system inflow and system outflow need to be modeled,
+# with system outflow being proportional to the conditions of U, S, and P
 
-# However, in the real world exit rates to permanent housing may be note, 
-# but not specifically to other housing in the community.
-# To address this, the inflows/outflow from S and P can be incorporated into estimates
+# Model makes simplified assumptions about adding permanent housing units:
+# - Lease up is happens within a single time step
+# - Added permanent housing reduces unsheltered homelessness immediately
+# - Utilization is 100%
 
 rm(list = ls(all = TRUE))  # resets R to fresh
 
+library(dplyr)
+library(tidyr)
 library(ggplot2)
 
 set.seed(78324)
@@ -26,10 +29,14 @@ stochastic <- TRUE # TRUE for stochastic, FALSE for deterministic
 
 
 #### Initial conditions ####
-U_0 <- 1000
-S_0 <- 150
-P_0 <- 350
-O_0 <- 0
+U_0 <- 1000 #unsheltered households
+S_0 <- 150  #households in shelter/temporary housing
+P_0 <- 350  #households in permanent housing within homelessness response system
+O_0 <- 0    #households placed in other permanent housing (outside of system)
+
+#### Additional units ####
+p_new <- data.frame(units = c(50,50), #new permanent housing units added (not cumulative)
+                    year = c(1,7)) #year new units are added
 
 #### Model parameters ####
 
@@ -45,41 +52,12 @@ p_out <- 365/720
 # Percent of exits to other community housing
 u_pct_o <- 0.1
 s_pct_o <- 0.2
-p_pct_o <- 0.7
+p_pct_o <- 0.6
 
 # Final outflow parameters
 beta_u <- u_out * u_pct_o
 beta_s <- s_out * s_pct_o
 beta_p <- p_out * p_pct_o
-
-
-#### Deterministic model ####
-
-
-# library(deSolve)
-# ## Function for deterministic model
-# model_func=function(t, x, vparameters){
-#   U = x[1]  
-#   S = x[2]  
-#   P = x[3]  
-#   O = x[4]  
-#   
-#   with(as.list(vparameters),{
-#     dU = alpha - beta_u*U - beta_s*S - beta_p*P            
-#     dS = 0 #fixed capacity
-#     dP = 0 #fixed capacity
-#     dO = beta_u*U + beta_s*S + beta_p*P
-#     out = c(dU, dS, dP, dO)
-#     list(out)
-#   })
-# }
-# 
-# ## Run deterministic model
-# vt <- seq(0, tend, delta_t)
-# vparameters = c(alpha = alpha, beta_u = beta_u, beta_s = beta_s, beta_p = beta_p)
-# inits <- c(U = U_0, S = S_0, P = P_0, O = O_0)
-# dmodel <- as.data.frame(lsoda(inits, vt, model_func, vparameters))
-
 
 
 #### Stochastic Model ####
@@ -104,6 +82,7 @@ for (iter in 1:niter2){
   lambda[4,] <- c(-1,0,0,1)
   
   while(vstate[1] > 0 & time < (tend + delta_t)) {
+    time <- round(time / delta_t, 0) * delta_t #fix rounding errors
     zstate[[i]] <- c(vstate, time, iter)
     U <- vstate[1]
     S <- vstate[2]
@@ -119,14 +98,17 @@ for (iter in 1:niter2){
       G_t[irow,] <- G_t[irow,]*sqrt(vec_p[irow])
     }
     G <- t(G_t)
-    
     W <- rnorm(ncol(G)) * stochastic # TRUE coerced to 1, FALSE coerced to 0
-    delta_U <- delta_t*(alpha - beta_u*U - beta_s*S - beta_p*P) + sqrt(delta_t)*sum(G[1,]*W)
-    delta_S <- 0 #delta_t*0                                     + sqrt(delta_t)*sum(G[2,]*W)
-    delta_P <- 0 #delta_t*0                                     + sqrt(delta_t)*sum(G[3,]*W)
-    delta_O <- delta_t*(beta_u*U + beta_s*S + beta_p*P)         + sqrt(delta_t)*sum(G[3,]*W)
     
-    vstate[1] <- vstate[1] + delta_U
+    # Stochastic changes
+    delta_U <- delta_t*(alpha - beta_u*U - beta_s*S - beta_p*P) + sqrt(delta_t)*sum(G[1,]*W)
+    delta_O <- delta_t*(beta_u*U + beta_s*S + beta_p*P)         + sqrt(delta_t)*sum(G[4,]*W)
+    
+    # Non-stochastic changes
+    delta_S <- 0
+    delta_P <- if(time %in% p_new$year) p_new$units[p_new$year == time] else 0
+    
+    vstate[1] <- vstate[1] + delta_U - delta_P #combine stochastic and non-stochastic changes
     vstate[2] <- vstate[2] + delta_S 
     vstate[3] <- vstate[3] + delta_P 
     vstate[4] <- vstate[4] + delta_O 
@@ -135,7 +117,7 @@ for (iter in 1:niter2){
     i <- i + 1
     time <- time + delta_t
   }
-  cat("Doing SDE realisation:",iter,niter," ",time,vstate,"\n")
+  cat("Iteration:", iter, niter, " ", time, vstate, "\n")
 }
 
 smodel <- data.frame(matrix(unlist(zstate), ncol = 6, byrow = TRUE))
@@ -147,14 +129,13 @@ subtitle <- if(stochastic) {
 } else { paste("Results of deterministic model with time steps of", round(delta_t,3), "year")}
 alpha <- if(stochastic) 0.1 else 1
 
-ggplot() +
-  geom_line(data = smodel, aes(x = time, y = U, group = iter), alpha = alpha) +
-  # geom_line(data = dmodel, aes(x = time, y = U), color = "indianred") +
+ggplot(smodel, aes(x = time, y = U, group = iter)) +
+  geom_line(alpha = alpha) +
   scale_x_continuous(breaks = seq(0, 10, 1)) +
   expand_limits(y = 0) +
-  labs(title = "Projection of Unsheltered Homelessness",
+  labs(title = "Projections of Unsheltered Homelessness",
        subtitle = subtitle,
        x = "Years",
-       y = "Unsheltered Homelessness") +
+       y = "Households") +
   theme_minimal() +
   theme(panel.grid.minor.x = element_blank())
