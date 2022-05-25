@@ -95,17 +95,26 @@ for (iter in 1:niter2){
     
     G_t <- lambda
     for (irow in 1:nrow(G_t)){
-      G_t[irow,] <- G_t[irow,]*sqrt(vec_p[irow])
+      G_t[irow,] <- G_t[irow,] * sqrt(vec_p[irow]) #state changes * sqrt of flow rates
     }
     G <- t(G_t)
     W <- rnorm(ncol(G)) * stochastic # TRUE coerced to 1, FALSE coerced to 0
     
     # Stochastic changes
+    ## G contains square roots of flow rates (with signs representing state changes)
+    ## W contains draws from Wiener process with mean = 0 and sd = 1
+    ## Multiplying G * W scales the variance to approximate poisson process with lambda = flow rates
+    ## sqrt(lambda) * norm(0, 1) ~= pois(lambda)
+    
     delta_U <- delta_t*(alpha - beta_u*U - beta_s*S - beta_p*P) + sqrt(delta_t)*sum(G[1,]*W)
     delta_O <- delta_t*(beta_u*U + beta_s*S + beta_p*P)         + sqrt(delta_t)*sum(G[4,]*W)
     
     # Non-stochastic changes
-    delta_S <- 0
+    ## It is possible to add a stochastic element to these otherwise static capacities
+    ## The white noise term would be G * W * sqrt(n), where n is the number of state changes for the compartment
+    ## sum of n random normal variables == norm(0, sqrt(n))
+
+        delta_S <- 0
     delta_P <- if(time %in% p_new$year) p_new$units[p_new$year == time] else 0
     
     vstate[1] <- vstate[1] + delta_U - delta_P #combine stochastic and non-stochastic changes
