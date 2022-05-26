@@ -35,7 +35,10 @@ P_0 <- 350  #households in permanent housing within homelessness response system
 O_0 <- 0    #households placed in other permanent housing (outside of system)
 
 #### Additional units ####
-p_new <- data.frame(units = c(50,50), #new permanent housing units added (not cumulative)
+# Added units are net changes at a point in time, not cumulative
+s_new <- data.frame(units = 50, #new shelter units added
+                    year = 2)
+p_new <- data.frame(units = c(50,50), #new permanent housing units added
                     year = c(1,7)) #year new units are added
 
 #### Model parameters ####
@@ -75,13 +78,13 @@ for (iter in 1:niter2){
   # State changes: http://sherrytowers.com/2016/01/02/stochastic-compartmental-modelling/#step2
   K <- length(vstate)  # number of compartments
   J <- 4               # number of possible state changes
-  lambda <- matrix(0,nrow=J,ncol=length(vstate))
+  lambda <- matrix(0,nrow=J,ncol=K)
   lambda[1,] <- c(1,0,0,0)
   lambda[2,] <- c(-1,0,0,1)
   lambda[3,] <- c(-1,0,0,1)
   lambda[4,] <- c(-1,0,0,1)
   
-  while(vstate[1] > 0 & time < (tend + delta_t)) {
+  while(vstate[1] > 0 & time <= tend) {
     time <- round(time / delta_t, 0) * delta_t #fix rounding errors
     zstate[[i]] <- c(vstate, time, iter)
     U <- vstate[1]
@@ -107,19 +110,17 @@ for (iter in 1:niter2){
     ## sqrt(lambda) * norm(0, 1) ~= pois(lambda)
     
     delta_U <- delta_t*(alpha - beta_u*U - beta_s*S - beta_p*P) + sqrt(delta_t)*sum(G[1,]*W)
+    delta_S <- 0                                                + sqrt(delta_t)*sum(G[2,]*W)
+    delta_P <- 0                                                + sqrt(delta_t)*sum(G[3,]*W)
     delta_O <- delta_t*(beta_u*U + beta_s*S + beta_p*P)         + sqrt(delta_t)*sum(G[4,]*W)
     
-    # Non-stochastic changes
-    ## It is possible to add a stochastic element to these otherwise static capacities
-    ## The white noise term would be G * W * sqrt(n), where n is the number of state changes for the compartment
-    ## sum of n random normal variables == norm(0, sqrt(n))
-
-        delta_S <- 0
-    delta_P <- if(time %in% p_new$year) p_new$units[p_new$year == time] else 0
+    # Capacity change
+    delta_S_cap <- if(time %in% s_new$year) s_new$units[s_new$year == time] else 0
+    delta_P_cap <- if(time %in% p_new$year) p_new$units[p_new$year == time] else 0
     
-    vstate[1] <- vstate[1] + delta_U - delta_P #combine stochastic and non-stochastic changes
-    vstate[2] <- vstate[2] + delta_S 
-    vstate[3] <- vstate[3] + delta_P 
+    vstate[1] <- vstate[1] + delta_U - delta_S_cap - delta_P_cap
+    vstate[2] <- vstate[2] + delta_S + delta_S_cap
+    vstate[3] <- vstate[3] + delta_P + delta_P_cap 
     vstate[4] <- vstate[4] + delta_O 
     
     vstate[vstate<0] <- 0
