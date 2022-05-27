@@ -6,9 +6,11 @@
 # S = temporary shelter (e.g., emergency shelter, transitional housing)
 # P = permanent housing (e.g., rapid rehousing, permanent supportive housing)
 # O = other housing in the community
-# Because shelter and housing have fixed capacities, their inflows/outflows cancel out
-# As a result, only the system inflow and system outflow need to be modeled,
-# with system outflow being proportional to the conditions of U, S, and P
+# Because S and P have fixed capacities, their inflows/outflows cancel out 
+# (except for white noise, which is scaled according to the outflows from S and P).
+# As a result, only the dynamics of system inflow and system outflow are modeled,
+# with system outflow being proportional to the conditions of U, S, and P.
+# White noise is added to these dynamics, scaled according to their flows.
 
 # Model makes simplified assumptions about adding permanent housing units:
 # - Lease up is happens within a single time step
@@ -22,7 +24,7 @@ library(tidyr)
 library(ggplot2)
 
 set.seed(78324)
-tend <- 10         # years to model
+tend <- 5          # years to model
 delta_t <- 1/12    # time steps
 niter <- 100       # iterations of stochastic model
 stochastic <- TRUE # TRUE for stochastic, FALSE for deterministic
@@ -44,7 +46,7 @@ p_new <- data.frame(units = c(50,50), #new permanent housing units added
 #### Model parameters ####
 
 ## Inflow
-alpha <- 300 #fixed inflow rate per year
+u_in <- 300 #fixed inflow rate per year
 
 ## Outflow 
 # Rates of flow in years^{-1} (inverse of avg LOS)
@@ -57,10 +59,15 @@ u_pct_o <- 0.1
 s_pct_o <- 0.2
 p_pct_o <- 0.6
 
-# Final outflow parameters
-beta_u <- u_out * u_pct_o
-beta_s <- s_out * s_pct_o
-beta_p <- p_out * p_pct_o
+# Final outflow rates
+rate_u_o <- u_out * u_pct_o
+rate_s_o <- s_out * s_pct_o
+rate_p_o <- p_out * p_pct_o
+
+## Fixed capacity compartments
+# Inflow = Outflow, except for white noise
+rate_s <- s_out
+rate_p <- p_out
 
 
 #### Stochastic Model ####
@@ -76,31 +83,44 @@ for (iter in 1:niter2){
   vstate <- c(U_0, S_0, P_0, O_0)
   
   # State changes: http://sherrytowers.com/2016/01/02/stochastic-compartmental-modelling/#step2
+  # First four state changes are the net inflow and outflow of the system
+  # Second four state changes are for the white noise for fixed capacity resources
   K <- length(vstate)  # number of compartments
-  J <- 4               # number of possible state changes
+  J <- 8               # number of possible state changes
   lambda <- matrix(0,nrow=J,ncol=K)
-  lambda[1,] <- c(1,0,0,0)
-  lambda[2,] <- c(-1,0,0,1)
-  lambda[3,] <- c(-1,0,0,1)
-  lambda[4,] <- c(-1,0,0,1)
+  lambda[1,] <- c( 1, 0, 0, 0) # inflow into U
+  lambda[2,] <- c(-1, 0, 0, 1) # net flow to O, driven by U
+  lambda[3,] <- c(-1, 0, 0, 1) # net flow to O, driven by S
+  lambda[4,] <- c(-1, 0, 0, 1) # net flow to O, driven by P
+  lambda[5,] <- c( 0, 1, 0, 0) # inflow into S
+  lambda[6,] <- c( 0,-1, 0, 0) # outflow from S
+  lambda[7,] <- c( 0, 0, 1, 0) # inflow into P
+  lambda[8,] <- c( 0, 0,-1, 0) # outflow from P
   
   while(vstate[1] > 0 & time <= tend) {
-    time <- round(time / delta_t, 0) * delta_t #fix rounding errors
-    zstate[[i]] <- c(vstate, time, iter)
+    
+    time <- round(time / delta_t, 0) * delta_t # fix rounding errors
+    
+    zstate[[i]] <- c(vstate, time, iter) # current state of system
+    
     U <- vstate[1]
     S <- vstate[2]
     P <- vstate[3]
     O <- vstate[4]
-    vec_p <- c(alpha, 
-              beta_u*U,
-              beta_s*S,
-              beta_p*P)
     
-    G_t <- lambda
-    for (irow in 1:nrow(G_t)){
-      G_t[irow,] <- G_t[irow,] * sqrt(vec_p[irow]) #state changes * sqrt of flow rates
-    }
+    vec_p <- c(u_in, 
+              rate_u_o*U,
+              rate_s_o*S,
+              rate_p_o*P,
+              rate_s*S,
+              rate_s*S,
+              rate_p*P,
+              rate_p*P)
+    
+    # G matrix for scaling white noise terms
+    G_t <- lambda * sqrt(vec_p) #state changes * sqrt of flow rates
     G <- t(G_t)
+    
     W <- rnorm(ncol(G)) * stochastic # TRUE coerced to 1, FALSE coerced to 0
     
     # Stochastic changes
@@ -109,14 +129,14 @@ for (iter in 1:niter2){
     ## Multiplying G * W scales the variance to approximate poisson process with lambda = flow rates
     ## sqrt(lambda) * norm(0, 1) ~= pois(lambda)
     
-    delta_U <- delta_t*(alpha - beta_u*U - beta_s*S - beta_p*P) + sqrt(delta_t)*sum(G[1,]*W)
-    delta_S <- 0                                                + sqrt(delta_t)*sum(G[2,]*W)
-    delta_P <- 0                                                + sqrt(delta_t)*sum(G[3,]*W)
-    delta_O <- delta_t*(beta_u*U + beta_s*S + beta_p*P)         + sqrt(delta_t)*sum(G[4,]*W)
+    delta_U <- delta_t*(u_in - (rate_u_o*U + rate_s_o*S + rate_p_o*P)) + sqrt(delta_t)*sum(G[1,]*W)
+    delta_S <- 0                                                       + sqrt(delta_t)*sum(G[2,]*W)
+    delta_P <- 0                                                       + sqrt(delta_t)*sum(G[3,]*W)
+    delta_O <- delta_t*(rate_u_o*U + rate_s_o*S + rate_p_o*P)          + sqrt(delta_t)*sum(G[4,]*W)
     
     # Capacity change
-    delta_S_cap <- if(time %in% s_new$year) s_new$units[s_new$year == time] else 0
-    delta_P_cap <- if(time %in% p_new$year) p_new$units[p_new$year == time] else 0
+    delta_S_cap <- max(0, s_new$units[s_new$year == time])
+    delta_P_cap <- max(0, p_new$units[p_new$year == time])
     
     vstate[1] <- vstate[1] + delta_U - delta_S_cap - delta_P_cap
     vstate[2] <- vstate[2] + delta_S + delta_S_cap
