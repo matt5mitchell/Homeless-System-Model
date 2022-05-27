@@ -66,8 +66,11 @@ rate_p_o <- p_out * p_pct_o
 
 ## Fixed capacity compartments
 # Inflow = Outflow, except for white noise
-rate_s <- s_out
-rate_p <- p_out
+# Note that outflow is split between terms above and below
+rate_s_in <- s_out
+rate_p_in <- p_out
+rate_s_x <- s_out - rate_s_o # portion of flow not already accounted for
+rate_p_x <- p_out - rate_p_o # portion of flow not already accounted for
 
 
 #### Stochastic Model ####
@@ -89,13 +92,13 @@ for (iter in 1:niter2){
   J <- 8               # number of possible state changes
   lambda <- matrix(0,nrow=J,ncol=K)
   lambda[1,] <- c( 1, 0, 0, 0) # inflow into U
-  lambda[2,] <- c(-1, 0, 0, 1) # net flow to O, driven by U
-  lambda[3,] <- c(-1, 0, 0, 1) # net flow to O, driven by S
-  lambda[4,] <- c(-1, 0, 0, 1) # net flow to O, driven by P
+  lambda[2,] <- c(-1, 0, 0, 1) # (partial) outflow from U, drives net flow to O
+  lambda[3,] <- c(-1,-1, 0, 1) # (partial) outflow from S, drives net flow to O
+  lambda[4,] <- c(-1, 0,-1, 1) # (partial) outflow from P, drives net flow to O
   lambda[5,] <- c( 0, 1, 0, 0) # inflow into S
-  lambda[6,] <- c( 0,-1, 0, 0) # outflow from S
+  lambda[6,] <- c( 0,-1, 0, 0) # (partial) outflow from S
   lambda[7,] <- c( 0, 0, 1, 0) # inflow into P
-  lambda[8,] <- c( 0, 0,-1, 0) # outflow from P
+  lambda[8,] <- c( 0, 0,-1, 0) # (partial) outflow from P
   
   while(vstate[1] > 0 & time <= tend) {
     
@@ -112,13 +115,13 @@ for (iter in 1:niter2){
               rate_u_o*U,
               rate_s_o*S,
               rate_p_o*P,
-              rate_s*S,
-              rate_s*S,
-              rate_p*P,
-              rate_p*P)
+              rate_s_in*S,
+              rate_s_x*S,
+              rate_p_in*P,
+              rate_p_x*P)
     
     # G matrix for scaling white noise terms
-    G_t <- lambda * sqrt(vec_p) #state changes * sqrt of flow rates
+    G_t <- lambda * sqrt(vec_p) # state changes * sqrt of flow rates
     G <- t(G_t)
     
     W <- rnorm(ncol(G)) * stochastic # TRUE coerced to 1, FALSE coerced to 0
