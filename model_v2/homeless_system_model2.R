@@ -162,7 +162,13 @@ subtitle <- if(stochastic) {
 } else { paste("Results of deterministic model with time steps of", round(delta_t,3), "year")}
 alpha <- if(stochastic) 0.1 else 1
 
-ggplot(smodel, aes(x = time, y = U, group = iter)) +
+ci <- smodel %>%
+  group_by(time) %>%
+  summarize(lwr = quantile(U, .025)[[1]],
+            med = median(U),
+            upr = quantile(U, .975)[[1]])
+
+p <- ggplot(smodel, aes(x = time, y = U, group = iter)) +
   geom_line(alpha = alpha) +
   scale_x_continuous(breaks = seq(0, 10, 1)) +
   expand_limits(y = 0) +
@@ -172,3 +178,9 @@ ggplot(smodel, aes(x = time, y = U, group = iter)) +
        y = "Households") +
   theme_minimal() +
   theme(panel.grid.minor.x = element_blank())
+
+if(stochastic) {
+  p +
+    geom_ribbon(data = ci, aes(ymin = lwr, ymax = upr), alpha = alpha) +
+    geom_line(data = ci, aes(y = med), color = "indianred")
+} else {p}
