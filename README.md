@@ -8,8 +8,8 @@ Version 1 was developed in 2019. It was an early attempt to capture some of the 
 
 Version 2 is a rethinking of the model, which simplifies the flows substantially. The model uses stochastic differential equations to reflect real world uncertainty. This is a work in progress.
 
-![Example](/images/stochastic_example.png)
+*Example plot of stochastic projections:*
 
-*Example plot of stochastic projections*
+![Example](/images/stochastic_example.png)
 
 The code for the stochastic modeling was borrowed heavily from @smtowers and their excellent tutorial: http://sherrytowers.com/2016/02/06/stochastic-compartmental-modelling-with-stochastic-differential-equations-2/ 
